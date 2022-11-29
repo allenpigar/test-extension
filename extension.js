@@ -1,7 +1,9 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 const vscode = require("vscode");
-const { posix } = require("path");
+const sdk = require("@zesty-io/sdk");
+const fs = require("fs");
+const path = require("path");
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -12,45 +14,82 @@ const { posix } = require("path");
 
 var instanceZuid = null;
 var token = null;
+var zestySDK = null;
+var basePath = "";
+const folders = [
+  "/webengine",
+  "/webengine/views",
+  "/webengine/styles",
+  "/webengine/scripts",
+];
+
+function makeDir(dir) {
+  if (fs.existsSync(dir)) return;
+  fs.mkdirSync(dir);
+}
+
+function makeFolders(folders) {
+  folders.forEach((folder) => makeDir(basePath + folder));
+}
+
+function makeFileSync(type, filename, content) {
+  var file = basePath;
+  if (type === "view") file += `${folders[1]}/${filename}`;
+  if (type === "style") file += `${folders[2]}/${filename}`;
+  if (type === "script") file += `${folders[3]}/${filename}`;
+  if (!fs.existsSync(file)) {
+    makeDir(path.dirname(file));
+    fs.writeFileSync(file, content);
+  }
+}
+
+async function syncInstanceView() {
+  const views = await zestySDK.instance.getViews();
+  views.data.forEach((view) =>
+    makeFileSync("view", view.fileName + ".html", view.code || "")
+  );
+}
+
+async function syncInstanceStyles() {
+  const stylesheets = await zestySDK.instance.getStylesheets();
+  stylesheets.data.forEach((stylesheet) =>
+    makeFileSync("style", stylesheet.fileName, stylesheet.code)
+  );
+}
+
+async function syncInstanceScipts() {}
 
 async function activate(context) {
   try {
-    const basePath = vscode.workspace.workspaceFolders[0].uri;
-    const zestyJson = basePath.with({
-      path: posix.join(basePath.path, "zesty.json"),
+    basePath = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const data = fs.readFileSync(`${basePath}/zesty.json`, {
+      encoding: "utf8",
     });
-    const readData = await vscode.workspace.fs.readFile(zestyJson);
-    const readStr = Buffer.from(readData).toString("utf8");
-    const readJson = JSON.parse(readStr);
-    instanceZuid = readJson.instance_zuid;
-    token = readJson.token;
+    const zestyConfig = JSON.parse(data);
+    instanceZuid = zestyConfig.instance_zuid;
+    token = zestyConfig.token;
+    zestySDK = new sdk(instanceZuid, token);
+    await makeFolders(folders);
+    await syncInstanceView();
+    await syncInstanceStyles();
+    await syncInstanceScipts();
   } catch (e) {
-    vscode.window.showInformationMessage("zesty.json cannot find zesty.json");
+    vscode.window.showInformationMessage(e.message);
   }
-  console.log(
-    'Congratulations, your extension "test-extension" is now active!'
-  );
-
   let disposable = vscode.commands.registerCommand(
-    "test-extension.helloWorld",
+    "test-extension.run",
     function () {
-      vscode.window.showInformationMessage("Hello World from test-extension!");
+      vscode.window.showInformationMessage("Extension is now running!");
     }
   );
 
   context.subscriptions.push(disposable);
-
-  vscode.commands.registerCommand("test-extension.getAllFiels", getAllFiles);
 }
 
 // This method is called when your extension is deactivated
 function deactivate() {}
-async function getAllFiles() {
-  vscode.window.showInformationMessage("From All Files");
-}
 
 module.exports = {
   activate,
   deactivate,
-  getAllFiles,
 };
